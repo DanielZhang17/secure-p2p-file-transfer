@@ -12,7 +12,7 @@ export default {
         const id = env.ROOMS.idFromName(roomId);
         const stub = env.ROOMS.get(id);
 
-        return stub.fetch(
+        return await stub.fetch(
           new Request("https://room/init", {
             method: "POST",
             body: JSON.stringify({ roomId }),
@@ -27,14 +27,14 @@ export default {
         const id = env.ROOMS.idFromName(roomId);
         const stub = env.ROOMS.get(id);
 
-        return stub.fetch(request);
+        return await stub.fetch(request);
       }
 
       if (url.pathname.startsWith("/api/")) {
         return Response.json({ error: "not_found" }, { status: 404 });
       }
 
-      return env.ASSETS.fetch(request);
+      return await env.ASSETS.fetch(request);
     } catch (error) {
       ctx.waitUntil(logUnexpectedError(error, request));
       return Response.json({ error: "internal_error" }, { status: 500 });
