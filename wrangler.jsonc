@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "secure-p2p-file-transfer",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "TransferRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TransferRoom"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SPILLOVER",
+      "bucket_name": "secure-p2p-spillover"
+    }
+  ],
+  "vars": {
+    "ROOM_TTL_SECONDS": "86400",
+    "SPILLOVER_CAP_BYTES": "10737418240",
+    "MAX_RELAY_REQUEST_BYTES": "67108864"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
