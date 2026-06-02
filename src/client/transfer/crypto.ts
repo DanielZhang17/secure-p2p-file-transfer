@@ -35,7 +35,7 @@ const phraseWords = [
 ] as const;
 
 export async function createPeerKeyPair(): Promise<PeerKeyPair> {
-  return crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]) as Promise<PeerKeyPair>;
+  return crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]) as Promise<PeerKeyPair>;
 }
 
 export async function deriveSharedTransferKeys(
@@ -65,12 +65,14 @@ export async function deriveSharedTransferKeys(
 
 export async function verificationPhrase(verificationKey: ArrayBuffer): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", verificationKey));
+  const words: string[] = [];
 
-  return [
-    phraseWords[digest[0] % phraseWords.length],
-    phraseWords[digest[1] % phraseWords.length],
-    phraseWords[digest[2] % phraseWords.length],
-  ].join("-");
+  for (let index = 0; index < 5; index += 1) {
+    words.push(phraseWords[digest[index] >> 4]);
+    words.push(phraseWords[digest[index] & 0x0f]);
+  }
+
+  return words.join("-");
 }
 
 export async function encryptChunk(
