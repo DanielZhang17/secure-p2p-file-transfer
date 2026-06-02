@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { assertRelayRequestAllowed } from "./relay";
+import { assertRelayRequestAllowed, parseRelayContentLength, parseRelayMaxBytes } from "./relay";
 
 export { TransferRoom } from "./room";
 
@@ -32,8 +32,9 @@ export default {
       }
 
       if (url.pathname === "/api/relay" && request.method === "POST") {
-        const contentLength = Number.parseInt(request.headers.get("content-length") ?? "-1", 10);
-        assertRelayRequestAllowed(contentLength, Number.parseInt(env.MAX_RELAY_REQUEST_BYTES, 10));
+        const contentLength = parseRelayContentLength(request.headers.get("content-length"));
+        const maxBytes = parseRelayMaxBytes(env.MAX_RELAY_REQUEST_BYTES);
+        assertRelayRequestAllowed(contentLength, maxBytes);
 
         return new Response(request.body, {
           headers: { "content-type": "application/octet-stream" },

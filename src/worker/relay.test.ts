@@ -2,7 +2,11 @@
 
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { assertRelayRequestAllowed } from "./relay";
+import {
+  assertRelayRequestAllowed,
+  parseRelayContentLength,
+  parseRelayMaxBytes,
+} from "./relay";
 
 describe("assertRelayRequestAllowed", () => {
   it("accepts requests at or below the configured byte limit", () => {
@@ -29,7 +33,7 @@ describe("assertRelayRequestAllowed", () => {
   });
 
   it("rejects missing content length", () => {
-    expect(() => assertRelayRequestAllowed(Number.parseInt("", 10), 64 * 1024 * 1024)).toThrow(
+    expect(() => assertRelayRequestAllowed(Number.NaN, 64 * 1024 * 1024)).toThrow(
       "content length is required",
     );
   });
@@ -47,6 +51,31 @@ describe("assertRelayRequestAllowed", () => {
     expect(() => assertRelayRequestAllowed(-1, 64 * 1024 * 1024)).toThrow(
       "content length is required",
     );
+  });
+});
+
+describe("parseRelayContentLength", () => {
+  it("accepts ASCII decimal digits", () => {
+    expect(parseRelayContentLength("0")).toBe(0);
+    expect(parseRelayContentLength("123")).toBe(123);
+  });
+
+  it("rejects missing, empty, or malformed values", () => {
+    for (const value of [null, "", "1junk", "1, 67108865", "1e9"]) {
+      expect(() => parseRelayContentLength(value)).toThrow("content length is required");
+    }
+  });
+});
+
+describe("parseRelayMaxBytes", () => {
+  it("accepts ASCII decimal digits", () => {
+    expect(parseRelayMaxBytes("67108864")).toBe(64 * 1024 * 1024);
+  });
+
+  it("rejects missing, empty, or malformed values", () => {
+    for (const value of [null, "", "1junk", "1, 67108865", "1e9"]) {
+      expect(() => parseRelayMaxBytes(value)).toThrow("relay limit is not configured");
+    }
   });
 });
 
