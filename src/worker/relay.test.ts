@@ -16,6 +16,18 @@ describe("assertRelayRequestAllowed", () => {
     );
   });
 
+  it("rejects invalid configured byte limits", () => {
+    for (const maxBytes of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      0,
+      -1,
+      64 * 1024 * 1024 + 0.5,
+    ]) {
+      expect(() => assertRelayRequestAllowed(1, maxBytes)).toThrow("relay limit is not configured");
+    }
+  });
+
   it("rejects missing content length", () => {
     expect(() => assertRelayRequestAllowed(Number.parseInt("", 10), 64 * 1024 * 1024)).toThrow(
       "content length is required",
