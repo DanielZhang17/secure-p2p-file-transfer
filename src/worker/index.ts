@@ -32,9 +32,12 @@ export default {
       }
 
       if (url.pathname === "/api/relay" && request.method === "POST") {
-        const contentLength = parseRelayContentLength(request.headers.get("content-length"));
         const maxBytes = parseRelayMaxBytes(env.MAX_RELAY_REQUEST_BYTES);
-        assertRelayRequestAllowed(contentLength, maxBytes);
+        const relayError = relayRequestError(request, maxBytes);
+
+        if (relayError) {
+          return relayError;
+        }
 
         return new Response(request.body, {
           headers: { "content-type": "application/octet-stream" },
@@ -52,6 +55,28 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+function relayRequestError(request: Request, maxBytes: number): Response | null {
+  try {
+    const contentLength = parseRelayContentLength(request.headers.get("content-length"));
+    assertRelayRequestAllowed(contentLength, maxBytes);
+    return null;
+  } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+
+    if (error.message === "content length is required") {
+      return Response.json({ error: "content_length_required" }, { status: 411 });
+    }
+
+    if (error.message === "relay request exceeds configured limit") {
+      return Response.json({ error: "relay_request_too_large" }, { status: 413 });
+    }
+
+    throw error;
+  }
+}
 
 function logUnexpectedError(error: unknown, request: Request): Promise<void> {
   const url = new URL(request.url);

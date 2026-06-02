@@ -6,11 +6,11 @@ export interface VerifyPhraseProps {
 
 export function VerifyPhrase({ phrase, confirmed, onConfirm }: VerifyPhraseProps) {
   return (
-    <section className="verify-box" aria-label="Verification phrase">
-      <span>Verification phrase</span>
+    <section className="verify-box" aria-label="Local check phrase">
+      <span>Local check phrase</span>
       <strong>{phrase}</strong>
       <button type="button" disabled={confirmed} onClick={onConfirm}>
-        {confirmed ? "Verified" : "Looks right"}
+        {confirmed ? "Checked" : "Mark checked"}
       </button>
     </section>
   );

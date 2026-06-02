@@ -34,6 +34,13 @@ const phraseWords = [
   "prairie",
 ] as const;
 
+export function createLocalVerificationPhrase(): string {
+  const bytes = new Uint8Array(3);
+  crypto.getRandomValues(bytes);
+
+  return Array.from(bytes, (byte) => phraseWords[byte & 0x0f]).join("-");
+}
+
 export async function createPeerKeyPair(): Promise<PeerKeyPair> {
   return crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]) as Promise<PeerKeyPair>;
 }

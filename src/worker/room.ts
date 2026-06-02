@@ -28,7 +28,7 @@ export class TransferRoom extends DurableObject<Env> {
     }
 
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
-      return this.acceptSocket();
+      return this.acceptSocket(request);
     }
 
     return Response.json({ error: "not_found" }, { status: 404 });
@@ -76,7 +76,23 @@ export class TransferRoom extends DurableObject<Env> {
     return Response.json(result.record, { status: result.status });
   }
 
-  private acceptSocket(): Response {
+  private async acceptSocket(request: Request): Promise<Response> {
+    const record = await this.ctx.storage.get<RoomRecord>(ROOM_STORAGE_KEY);
+
+    if (!record) {
+      return Response.json({ error: "room_not_found" }, { status: 404 });
+    }
+
+    if (record.expiresAt <= Date.now()) {
+      await this.ctx.storage.deleteAll();
+      return Response.json({ error: "room_expired" }, { status: 410 });
+    }
+
+    const url = new URL(request.url);
+    if (url.searchParams.get("code") !== record.code) {
+      return Response.json({ error: "invalid_room_code" }, { status: 403 });
+    }
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];

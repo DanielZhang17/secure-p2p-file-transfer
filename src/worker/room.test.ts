@@ -1,7 +1,9 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import { SELF } from "cloudflare:test";
+import { env as cloudflareEnv } from "cloudflare:workers";
+import { SELF, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import type { Env } from "./env";
 
 interface CreateRoomResponse {
   roomId: string;
@@ -26,12 +28,59 @@ describe("room worker", () => {
     expect(body.expiresAt).toBeGreaterThan(Date.now());
   });
 
+  it("rejects websocket upgrades for rooms that were never created", async () => {
+    const response = await SELF.fetch("https://example.com/api/rooms/room-missing", {
+      headers: { Upgrade: "websocket" },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "room_not_found" });
+  });
+
+  it("requires the room code before accepting websocket upgrades", async () => {
+    const room = await createRoom();
+
+    const response = await SELF.fetch(`https://example.com/api/rooms/${room.roomId}`, {
+      headers: { Upgrade: "websocket" },
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "invalid_room_code" });
+  });
+
+  it("rejects websocket upgrades after the room alarm expires state", async () => {
+    const room = await createRoom();
+    const rooms = (cloudflareEnv as Env).ROOMS;
+    const id = rooms.idFromName(room.roomId);
+    const stub = rooms.get(id);
+
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+
+    const response = await SELF.fetch(`https://example.com/api/rooms/${room.roomId}?code=${room.code}`, {
+      headers: { Upgrade: "websocket" },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "room_not_found" });
+  });
+
   it("rejects unknown API routes", async () => {
     const response = await SELF.fetch("https://example.com/api/missing");
 
     expect(response.status).toBe(404);
   });
 });
+
+async function createRoom(): Promise<CreateRoomResponse> {
+  const response = await SELF.fetch("https://example.com/api/rooms", { method: "POST" });
+  const body: unknown = await response.json();
+
+  if (!isCreateRoomResponse(body)) {
+    throw new Error("expected room creation response");
+  }
+
+  return body;
+}
 
 function isCreateRoomResponse(value: unknown): value is CreateRoomResponse {
   return (

@@ -93,14 +93,23 @@ describe("relay worker route", () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
   });
 
-  it("returns the Worker error response for oversized relay requests", async () => {
+  it("returns a client error for oversized relay requests", async () => {
     const response = await SELF.fetch("https://example.com/api/relay", {
       method: "POST",
       headers: { "content-length": String(64 * 1024 * 1024 + 1) },
       body: new Uint8Array([1]),
     });
 
-    expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: "internal_error" });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "relay_request_too_large" });
+  });
+
+  it("returns a client error when relay content length is missing", async () => {
+    const response = await SELF.fetch("https://example.com/api/relay", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(411);
+    expect(await response.json()).toEqual({ error: "content_length_required" });
   });
 });
