@@ -2,13 +2,17 @@
 
 import { env as cloudflareEnv } from "cloudflare:workers";
 import { SELF, runDurableObjectAlarm } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
-import type { Env } from "./env";
+import { describe, expect, it, vi } from "vitest";
+import { roomCodesEqual } from "./room";
 
 interface CreateRoomResponse {
   roomId: string;
   code: string;
   expiresAt: number;
+}
+
+interface TimingSafeSubtleCrypto extends SubtleCrypto {
+  timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
 }
 
 describe("room worker", () => {
@@ -48,9 +52,22 @@ describe("room worker", () => {
     expect(await response.json()).toEqual({ error: "invalid_room_code" });
   });
 
+  it("compares fixed-length room codes with timing-safe equality", () => {
+    const timingSafeEqual = vi.spyOn(crypto.subtle as TimingSafeSubtleCrypto, "timingSafeEqual");
+
+    try {
+      expect(roomCodesEqual("ABCDEF", "ABCDEF")).toBe(true);
+      expect(roomCodesEqual("ABCDEG", "ABCDEF")).toBe(false);
+      expect(roomCodesEqual("ABC", "ABCDEF")).toBe(false);
+      expect(timingSafeEqual).toHaveBeenCalledTimes(2);
+    } finally {
+      timingSafeEqual.mockRestore();
+    }
+  });
+
   it("rejects websocket upgrades after the room alarm expires state", async () => {
     const room = await createRoom();
-    const rooms = (cloudflareEnv as Env).ROOMS;
+    const rooms = cloudflareEnv.ROOMS;
     const id = rooms.idFromName(room.roomId);
     const stub = rooms.get(id);
 

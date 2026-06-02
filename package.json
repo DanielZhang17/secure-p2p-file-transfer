@@ -20,7 +20,6 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "latest",
-    "@cloudflare/workers-types": "latest",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",

@@ -12,8 +12,14 @@ interface InitRoomBody {
   roomId: string;
 }
 
+interface TimingSafeSubtleCrypto extends SubtleCrypto {
+  timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
+}
+
 const ROOM_STORAGE_KEY = "room";
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ROOM_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
+const textEncoder = new TextEncoder();
 
 export class TransferRoom extends DurableObject<Env> {
   constructor(state: DurableObjectState, env: Env) {
@@ -89,7 +95,7 @@ export class TransferRoom extends DurableObject<Env> {
     }
 
     const url = new URL(request.url);
-    if (url.searchParams.get("code") !== record.code) {
+    if (!roomCodesEqual(url.searchParams.get("code"), record.code)) {
       return Response.json({ error: "invalid_room_code" }, { status: 403 });
     }
 
@@ -108,6 +114,16 @@ function roomCode(): string {
   crypto.getRandomValues(bytes);
 
   return Array.from(bytes, (byte) => ROOM_CODE_ALPHABET[byte & 31]).join("");
+}
+
+export function roomCodesEqual(candidate: string | null, expected: string): boolean {
+  if (candidate === null || !ROOM_CODE_PATTERN.test(candidate) || !ROOM_CODE_PATTERN.test(expected)) {
+    return false;
+  }
+
+  const subtle = crypto.subtle as TimingSafeSubtleCrypto;
+
+  return subtle.timingSafeEqual(textEncoder.encode(candidate), textEncoder.encode(expected));
 }
 
 function isInitRoomBody(value: unknown): value is InitRoomBody {

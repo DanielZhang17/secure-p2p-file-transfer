@@ -15,7 +15,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["@cloudflare/workers-types", "vitest/globals", "vite/client"]
+    "types": ["vitest/globals", "vite/client"]
   },
-  "include": ["src", "vite.config.ts", "vitest.config.ts", "worker"]
+  "include": ["worker-configuration.d.ts", "src", "vite.config.ts", "vitest.config.ts", "worker"]
 }
