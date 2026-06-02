@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { assertRelayRequestAllowed } from "./relay";
 
 export { TransferRoom } from "./room";
 
@@ -28,6 +29,15 @@ export default {
         const stub = env.ROOMS.get(id);
 
         return await stub.fetch(request);
+      }
+
+      if (url.pathname === "/api/relay" && request.method === "POST") {
+        const contentLength = Number.parseInt(request.headers.get("content-length") ?? "-1", 10);
+        assertRelayRequestAllowed(contentLength, Number.parseInt(env.MAX_RELAY_REQUEST_BYTES, 10));
+
+        return new Response(request.body, {
+          headers: { "content-type": "application/octet-stream" },
+        });
       }
 
       if (url.pathname.startsWith("/api/")) {
