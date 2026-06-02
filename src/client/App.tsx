@@ -4,6 +4,7 @@ import { FilePicker } from "./components/FilePicker";
 import { JoinRoom } from "./components/JoinRoom";
 import { TransferMonitor } from "./components/TransferMonitor";
 import { VerifyPhrase } from "./components/VerifyPhrase";
+import { useTransferSession } from "./transfer/useTransferSession";
 
 type Mode = "landing" | "send" | "receive";
 
@@ -24,10 +25,10 @@ const seedProgress: TransferProgress = {
 
 export function App() {
   const [mode, setMode] = useState<Mode>("landing");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const transfer = useTransferSession();
   const [code, setCode] = useState("");
   const [verified, setVerified] = useState(false);
-  const fileCountLabel = `${selectedFiles.length} ${selectedFiles.length === 1 ? "file" : "files"} selected`;
+  const fileCountLabel = `${transfer.files.length} ${transfer.files.length === 1 ? "file" : "files"} selected`;
 
   return (
     <main className="app-shell">
@@ -51,16 +52,14 @@ export function App() {
 
         {mode === "send" ? (
           <section className="workflow" aria-label="Send files workflow">
-            <FilePicker onFilesSelected={setSelectedFiles} />
+            <FilePicker onFilesSelected={(files) => void transfer.selectFiles(files)} />
             <p className="file-count">{fileCountLabel}</p>
             <VerifyPhrase
               phrase={verificationPhrase}
               confirmed={verified}
               onConfirm={() => setVerified(true)}
             />
-            <TransferMonitor
-              progress={{ ...seedProgress, activeLanes: selectedFiles.length > 0 ? 8 : 0 }}
-            />
+            <TransferMonitor progress={transfer.progress} />
           </section>
         ) : null}
 
