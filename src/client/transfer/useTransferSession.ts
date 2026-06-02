@@ -21,7 +21,7 @@ export function useTransferSession() {
       completedChunks: 0,
       totalChunks,
       retryCount: 0,
-      activeLanes: totalBytes === 0 ? 0 : totalBytes > ONE_GIB ? 8 : 2,
+      activeLanes: files.length === 0 ? 0 : totalBytes > ONE_GIB ? 8 : 2,
       spilloverBytes: 0,
     };
   }, [files, manifests]);

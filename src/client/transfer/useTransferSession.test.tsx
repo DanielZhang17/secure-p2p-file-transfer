@@ -43,6 +43,26 @@ describe("useTransferSession", () => {
     });
   });
 
+  it("uses selected-file lanes for zero-byte files", async () => {
+    const { result } = renderHook(() => useTransferSession());
+    const file = new File([], "empty.txt", {
+      type: "text/plain",
+      lastModified: 1700000000000,
+    });
+
+    await act(async () => {
+      await result.current.selectFiles([file]);
+    });
+
+    expect(result.current.manifests).toHaveLength(1);
+    expect(result.current.manifests[0].chunkCount).toBe(1);
+    expect(result.current.progress).toMatchObject({
+      totalBytes: 0,
+      totalChunks: 1,
+      activeLanes: 2,
+    });
+  });
+
   it("uses selection index to distinguish multiple files with the same metadata", async () => {
     const { result } = renderHook(() => useTransferSession());
     const options = {
