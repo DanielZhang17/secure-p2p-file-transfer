@@ -8,6 +8,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    passWithNoTests: true,
     include: ["src/worker/**/*.test.ts"],
   },
 });
