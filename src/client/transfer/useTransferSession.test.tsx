@@ -1,8 +1,14 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FileManifest } from "../../shared/protocol";
+import * as manifestModule from "./manifest";
 import { useTransferSession } from "./useTransferSession";
 
 describe("useTransferSession", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("starts with idle progress", () => {
     const { result } = renderHook(() => useTransferSession());
 
@@ -63,6 +69,60 @@ describe("useTransferSession", () => {
     });
   });
 
+  it("keeps manifests paired with the latest overlapping selection", async () => {
+    const pendingManifests: Array<{
+      file: File;
+      transferId: string;
+      selectionIndex: number;
+      resolve: (manifest: FileManifest) => void;
+    }> = [];
+    vi.spyOn(manifestModule, "createFileManifest").mockImplementation(
+      (file, transferId, selectionIndex = 0) =>
+        new Promise((resolve) => {
+          pendingManifests.push({ file, transferId, selectionIndex, resolve });
+        }),
+    );
+    const { result } = renderHook(() => useTransferSession());
+    const firstFile = new File(["first"], "first.txt", {
+      type: "text/plain",
+      lastModified: 1700000000000,
+    });
+    const secondFile = new File(["second"], "second.txt", {
+      type: "text/plain",
+      lastModified: 1700000000001,
+    });
+    const selections: Promise<void>[] = [];
+
+    await act(async () => {
+      selections.push(result.current.selectFiles([firstFile]));
+      selections.push(result.current.selectFiles([secondFile]));
+    });
+
+    expect(pendingManifests).toHaveLength(2);
+
+    await act(async () => {
+      pendingManifests[1].resolve(createTestManifest(pendingManifests[1]));
+      await selections[1];
+    });
+
+    expect(result.current.files).toEqual([secondFile]);
+    expect(result.current.manifests[0]).toMatchObject({
+      name: "second.txt",
+      size: 6,
+    });
+
+    await act(async () => {
+      pendingManifests[0].resolve(createTestManifest(pendingManifests[0]));
+      await selections[0];
+    });
+
+    expect(result.current.files).toEqual([secondFile]);
+    expect(result.current.manifests[0]).toMatchObject({
+      name: "second.txt",
+      size: 6,
+    });
+  });
+
   it("uses selection index to distinguish multiple files with the same metadata", async () => {
     const { result } = renderHook(() => useTransferSession());
     const options = {
@@ -83,3 +143,24 @@ describe("useTransferSession", () => {
     expect(result.current.manifests[0].fileId).not.toBe(result.current.manifests[1].fileId);
   });
 });
+
+function createTestManifest({
+  file,
+  transferId,
+  selectionIndex,
+}: {
+  file: File;
+  transferId: string;
+  selectionIndex: number;
+}): FileManifest {
+  return {
+    transferId,
+    fileId: `file-${file.name}-${selectionIndex}`,
+    name: file.name,
+    size: file.size,
+    type: file.type || "application/octet-stream",
+    lastModified: file.lastModified,
+    chunkSize: 8,
+    chunkCount: 1,
+  };
+}
