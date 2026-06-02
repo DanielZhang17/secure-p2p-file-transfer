@@ -14,11 +14,9 @@ export async function saveProgress(progress: StoredProgress): Promise<void> {
   const db = await openDb();
 
   try {
-    await requestToPromise(
-      db.transaction(STORE_NAME, "readwrite")
-        .objectStore(STORE_NAME)
-        .put(progress, keyFor(progress.transferId, progress.fileId)),
-    );
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    transaction.objectStore(STORE_NAME).put(progress, keyFor(progress.transferId, progress.fileId));
+    await transactionToPromise(transaction);
   } finally {
     db.close();
   }
@@ -44,8 +42,8 @@ export async function loadProgress(transferId: string, fileId: string): Promise<
   }
 }
 
-function keyFor(transferId: string, fileId: string): string {
-  return `${transferId}:${fileId}`;
+function keyFor(transferId: string, fileId: string): [string, string] {
+  return [transferId, fileId];
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -64,5 +62,13 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+function transactionToPromise(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error);
   });
 }
