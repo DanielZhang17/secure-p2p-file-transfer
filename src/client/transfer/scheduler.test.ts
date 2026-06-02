@@ -2,6 +2,57 @@ import { describe, expect, it } from "vitest";
 import { scheduleChunks } from "./scheduler";
 
 describe("scheduleChunks", () => {
+  it("rejects invalid lanes", async () => {
+    await expect(
+      scheduleChunks({
+        chunkIndexes: [0],
+        lanes: 0,
+        maxRetries: 1,
+        sendChunk: async () => {},
+      }),
+    ).rejects.toThrow("lanes must be a positive integer");
+
+    await expect(
+      scheduleChunks({
+        chunkIndexes: [0],
+        lanes: Number.NaN,
+        maxRetries: 1,
+        sendChunk: async () => {},
+      }),
+    ).rejects.toThrow("lanes must be a positive integer");
+  });
+
+  it("rejects invalid maxRetries", async () => {
+    await expect(
+      scheduleChunks({
+        chunkIndexes: [0],
+        lanes: 1,
+        maxRetries: -1,
+        sendChunk: async () => {},
+      }),
+    ).rejects.toThrow("maxRetries must be a non-negative integer");
+
+    await expect(
+      scheduleChunks({
+        chunkIndexes: [0],
+        lanes: 1,
+        maxRetries: Number.NaN,
+        sendChunk: async () => {},
+      }),
+    ).rejects.toThrow("maxRetries must be a non-negative integer");
+  });
+
+  it("rejects invalid chunk index", async () => {
+    await expect(
+      scheduleChunks({
+        chunkIndexes: [0, -1],
+        lanes: 1,
+        maxRetries: 1,
+        sendChunk: async () => {},
+      }),
+    ).rejects.toThrow("chunk indexes must be non-negative integers");
+  });
+
   it("runs no more than the configured lane count", async () => {
     let active = 0;
     let maxActive = 0;
@@ -71,5 +122,31 @@ describe("scheduleChunks", () => {
     ).rejects.toThrow("permanent failure");
 
     expect(attempts).toBe(2);
+  });
+
+  it("waits for active lanes and does not start queued chunks after retries are exhausted", async () => {
+    const started: number[] = [];
+    let secondLaneSettled = false;
+
+    await expect(
+      scheduleChunks({
+        chunkIndexes: [0, 1, 2, 3, 4],
+        lanes: 2,
+        maxRetries: 0,
+        sendChunk: async (chunkIndex) => {
+          started.push(chunkIndex);
+
+          if (chunkIndex === 0) {
+            throw new Error("permanent failure");
+          }
+
+          await Promise.resolve();
+          secondLaneSettled = true;
+        },
+      }),
+    ).rejects.toThrow("permanent failure");
+
+    expect(secondLaneSettled).toBe(true);
+    expect(started).toEqual([0, 1]);
   });
 });
