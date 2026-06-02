@@ -36,4 +36,30 @@ describe("createFileManifest", () => {
     expect(manifest.chunkSize).toBe(LARGE_FILE_CHUNK_BYTES);
     expect(manifest.chunkCount).toBe(Math.ceil((GiB + 1) / LARGE_FILE_CHUNK_BYTES));
   });
+
+  it("uses selection index to distinguish duplicate file metadata", async () => {
+    const options = {
+      type: "application/octet-stream",
+      lastModified: 1700000000000,
+    };
+    const firstFile = new File(["same"], "duplicate.bin", options);
+    const secondFile = new File(["same"], "duplicate.bin", options);
+
+    const firstManifest = await createFileManifest(firstFile, "transfer-duplicates", 0);
+    const secondManifest = await createFileManifest(secondFile, "transfer-duplicates", 1);
+
+    expect(firstManifest.fileId).not.toBe(secondManifest.fileId);
+  });
+
+  it("uses one chunk for zero-byte files", async () => {
+    const file = new File([], "empty.txt", {
+      type: "text/plain",
+      lastModified: 1700000000000,
+    });
+
+    const manifest = await createFileManifest(file, "transfer-empty");
+
+    expect(manifest.size).toBe(0);
+    expect(manifest.chunkCount).toBe(1);
+  });
 });

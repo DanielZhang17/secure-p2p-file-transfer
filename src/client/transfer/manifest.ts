@@ -1,9 +1,9 @@
 import type { FileManifest } from "../../shared/protocol";
 import { selectChunkProfile } from "./chunkProfile";
 
-export async function createFileManifest(file: File, transferId: string): Promise<FileManifest> {
+export async function createFileManifest(file: File, transferId: string, selectionIndex = 0): Promise<FileManifest> {
   const profile = selectChunkProfile(file.size);
-  const stableInput = `${transferId}:${file.name}:${file.size}:${file.lastModified}`;
+  const stableInput = `${transferId}:${selectionIndex}:${file.name}:${file.size}:${file.lastModified}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stableInput));
   const fileId = `file-${toHex(new Uint8Array(digest)).slice(0, 16)}`;
 
