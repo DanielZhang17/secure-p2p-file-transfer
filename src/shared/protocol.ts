@@ -21,6 +21,14 @@ export interface ChunkAck {
   hash: string;
 }
 
+export interface SpilloverChunkRef {
+  transferId: string;
+  fileId: string;
+  chunkIndex: number;
+  ivBase64: string;
+  ciphertextBytes: number;
+}
+
 export interface TransferProgress {
   transferId: string;
   mode: TransferMode;
@@ -32,6 +40,7 @@ export interface TransferProgress {
   retryCount: number;
   activeLanes: number;
   spilloverBytes: number;
+  speedBytesPerSecond: number;
 }
 
 export type SignalPayload =
@@ -39,9 +48,16 @@ export type SignalPayload =
   | { type: "answer"; sdp: string }
   | { type: "ice"; candidate: RTCIceCandidateInit };
 
+export type TransferControlMessage =
+  | { type: "key-exchange"; transferId: string; publicKeyBase64: string }
+  | { type: "verification-confirmed"; transferId: string }
+  | { type: "manifest"; manifest: FileManifest };
+
 export type ClientRoomMessage =
   | { type: "join"; role: RoomRole; recoveryToken?: string }
   | { type: "signal"; payload: SignalPayload }
+  | { type: "transfer"; message: TransferControlMessage }
+  | { type: "spillover-chunk"; chunk: SpilloverChunkRef }
   | { type: "manifest"; manifest: FileManifest }
   | { type: "ack"; ack: ChunkAck }
   | { type: "heartbeat"; at: number };
@@ -50,6 +66,8 @@ export type ServerRoomMessage =
   | { type: "joined"; roomId: string; role: RoomRole; recoveryToken: string; expiresAt: number }
   | { type: "peer-joined"; role: RoomRole }
   | { type: "signal"; payload: SignalPayload }
+  | { type: "transfer"; message: TransferControlMessage }
+  | { type: "spillover-chunk"; chunk: SpilloverChunkRef }
   | { type: "manifest"; manifest: FileManifest }
   | { type: "ack"; ack: ChunkAck }
   | { type: "expired"; roomId: string }

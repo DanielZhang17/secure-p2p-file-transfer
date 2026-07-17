@@ -5,6 +5,10 @@ import * as manifestModule from "./manifest";
 import { useTransferSession } from "./useTransferSession";
 
 describe("useTransferSession", () => {
+  beforeEach(() => {
+    localStorage.removeItem("secure-p2p-transfer:outgoing-manifests");
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -141,6 +145,53 @@ describe("useTransferSession", () => {
     expect(result.current.manifests).toHaveLength(2);
     expect(result.current.manifests[0].transferId).toBe(result.current.manifests[1].transferId);
     expect(result.current.manifests[0].fileId).not.toBe(result.current.manifests[1].fileId);
+  });
+
+  it("restores saved manifests and reuses them when the same files are reselected", async () => {
+    const file = new File(["resume"], "resume.txt", {
+      type: "text/plain",
+      lastModified: 1700000000000,
+    });
+    const recovery = { recoveryToken: "recovery-1", roomId: "room-ABC123" };
+    const first = renderHook(() => useTransferSession(recovery));
+
+    await act(async () => {
+      await first.result.current.selectFiles([file]);
+    });
+
+    const savedManifest = first.result.current.manifests[0];
+    first.unmount();
+
+    const refreshed = renderHook(() => useTransferSession(recovery));
+
+    expect(refreshed.result.current.files).toEqual([]);
+    expect(refreshed.result.current.manifests).toEqual([savedManifest]);
+
+    await act(async () => {
+      await refreshed.result.current.selectFiles([file]);
+    });
+
+    expect(refreshed.result.current.files).toEqual([file]);
+    expect(refreshed.result.current.manifests).toEqual([savedManifest]);
+  });
+
+  it("does not restore saved manifests for a different recovery token", async () => {
+    const file = new File(["resume"], "resume.txt", {
+      type: "text/plain",
+      lastModified: 1700000000000,
+    });
+    const first = renderHook(() => useTransferSession({ recoveryToken: "recovery-1", roomId: "room-ABC123" }));
+
+    await act(async () => {
+      await first.result.current.selectFiles([file]);
+    });
+
+    first.unmount();
+
+    const refreshed = renderHook(() => useTransferSession({ recoveryToken: "recovery-2", roomId: "room-ABC123" }));
+
+    expect(refreshed.result.current.files).toEqual([]);
+    expect(refreshed.result.current.manifests).toEqual([]);
   });
 });
 

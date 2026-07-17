@@ -1,5 +1,16 @@
 import type { ClientRoomMessage, ServerRoomMessage } from "../../shared/protocol";
 
+export function roomWebSocketUrl(
+  roomId: string,
+  code: string,
+  location: Pick<Location, "host" | "protocol"> = window.location,
+): string {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const roomPath = `/api/rooms/${encodeURIComponent(roomId)}?code=${encodeURIComponent(code)}`;
+
+  return `${protocol}//${location.host}${roomPath}`;
+}
+
 export function encodeRoomMessage(message: ClientRoomMessage): string {
   return JSON.stringify(message);
 }

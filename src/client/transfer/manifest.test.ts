@@ -22,12 +22,14 @@ describe("createFileManifest", () => {
       chunkCount: 1,
     });
     expect(firstManifest.fileId).toMatch(/^file-/);
+    expect(firstManifest.fileHash).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
   });
 
   it("rounds large file chunk count upward", async () => {
     const file = {
       name: "large.bin",
       size: GiB + 1,
+      slice: () => new Blob(["large chunk"]),
       type: "",
       lastModified: 1700000000000,
     } as unknown as File;

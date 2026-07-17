@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeRoomMessage, parseServerMessage, RoomSocket } from "./roomSocket";
+import { encodeRoomMessage, parseServerMessage, roomWebSocketUrl, RoomSocket } from "./roomSocket";
 
 class FakeWebSocket {
   closed = false;
@@ -33,6 +33,12 @@ describe("roomSocket protocol helpers", () => {
       type: "peer-joined",
       role: "recipient",
     });
+  });
+
+  it("uses secure websocket URLs for HTTPS pages", () => {
+    expect(roomWebSocketUrl("room-ABCD23", "ABCD23", { host: "send.718788.xyz", protocol: "https:" })).toBe(
+      "wss://send.718788.xyz/api/rooms/room-ABCD23?code=ABCD23",
+    );
   });
 });
 

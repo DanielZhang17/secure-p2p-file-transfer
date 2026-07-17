@@ -1,19 +1,22 @@
+import { normalizeRoomCode } from "../../shared/roomCode";
+
 export interface JoinRoomProps {
   code: string;
+  label?: string;
   onCodeChange: (code: string) => void;
 }
 
-export function JoinRoom({ code, onCodeChange }: JoinRoomProps) {
+export function JoinRoom({ code, label = "Pairing code", onCodeChange }: JoinRoomProps) {
   return (
     <label className="field">
-      <span>Pairing code</span>
+      <span>{label}</span>
       <input
-        aria-label="Pairing code"
+        aria-label={label}
         value={code}
         maxLength={6}
         inputMode="text"
         autoComplete="one-time-code"
-        onChange={(event) => onCodeChange(event.currentTarget.value.toUpperCase())}
+        onChange={(event) => onCodeChange(normalizeRoomCode(event.currentTarget.value))}
       />
     </label>
   );

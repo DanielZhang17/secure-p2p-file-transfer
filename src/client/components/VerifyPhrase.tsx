@@ -1,17 +1,37 @@
 export interface VerifyPhraseProps {
+  confirmed?: boolean;
+  onConfirm?: () => void;
   phrase: string;
-  confirmed: boolean;
-  onConfirm: () => void;
+  labels?: VerifyPhraseLabels;
 }
 
-export function VerifyPhrase({ phrase, confirmed, onConfirm }: VerifyPhraseProps) {
+export interface VerifyPhraseLabels {
+  confirm: string;
+  confirmed: string;
+  help: string;
+  label: string;
+  title: string;
+}
+
+const defaultLabels: VerifyPhraseLabels = {
+  confirm: "The phrases match",
+  confirmed: "Phrase confirmed",
+  help: "Compare this phrase with the other device before sending files.",
+  label: "Transfer check phrase",
+  title: "Transfer check phrase",
+};
+
+export function VerifyPhrase({ confirmed = false, onConfirm, phrase, labels = defaultLabels }: VerifyPhraseProps) {
   return (
-    <section className="verify-box" aria-label="Local check phrase">
-      <span>Local check phrase</span>
+    <div className="verify-phrase" aria-label={labels.label}>
+      <span>{labels.title}</span>
       <strong>{phrase}</strong>
-      <button type="button" disabled={confirmed} onClick={onConfirm}>
-        {confirmed ? "Checked" : "Mark checked"}
-      </button>
-    </section>
+      <small>{labels.help}</small>
+      {confirmed ? <span role="status">{labels.confirmed}</span> : onConfirm ? (
+        <button type="button" className="secondary" onClick={onConfirm}>
+          {labels.confirm}
+        </button>
+      ) : null}
+    </div>
   );
 }

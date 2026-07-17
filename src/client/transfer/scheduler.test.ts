@@ -106,6 +106,47 @@ describe("scheduleChunks", () => {
     expect(attempts.get(0)).toBe(2);
   });
 
+  it("reports retries when a chunk send fails", async () => {
+    const retries: Array<{ chunkIndex: number; retryCount: number }> = [];
+    let attempts = 0;
+
+    await scheduleChunks({
+      chunkIndexes: [0],
+      lanes: 1,
+      maxRetries: 1,
+      onRetry: (chunkIndex, retryCount) => retries.push({ chunkIndex, retryCount }),
+      sendChunk: async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("temporary failure");
+        }
+      },
+    });
+
+    expect(retries).toEqual([{ chunkIndex: 0, retryCount: 1 }]);
+  });
+
+  it("halves future lane count after a retry when adaptive scheduling is enabled", async () => {
+    const laneChanges: number[] = [];
+    let failedOnce = false;
+
+    await scheduleChunks({
+      adaptive: true,
+      chunkIndexes: [0, 1, 2, 3, 4],
+      lanes: 4,
+      maxRetries: 1,
+      onLaneCountChange: (lanes) => laneChanges.push(lanes),
+      sendChunk: async (chunkIndex) => {
+        if (chunkIndex === 0 && !failedOnce) {
+          failedOnce = true;
+          throw new Error("temporary failure");
+        }
+      },
+    });
+
+    expect(laneChanges).toEqual([2]);
+  });
+
   it("rejects after retries are exhausted", async () => {
     let attempts = 0;
 

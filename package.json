@@ -15,22 +15,22 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
-    "react": "latest",
-    "react-dom": "latest"
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "latest",
-    "@testing-library/jest-dom": "latest",
-    "@testing-library/react": "latest",
-    "@testing-library/user-event": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "@vitejs/plugin-react": "latest",
-    "fake-indexeddb": "latest",
-    "happy-dom": "latest",
-    "typescript": "latest",
-    "vite": "latest",
-    "vitest": "latest",
-    "wrangler": "latest"
+    "@cloudflare/vitest-pool-workers": "0.18.5",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "fake-indexeddb": "6.2.5",
+    "happy-dom": "20.9.0",
+    "typescript": "6.0.3",
+    "vite": "8.0.16",
+    "vitest": "4.1.8",
+    "wrangler": "4.111.0"
   }
 }

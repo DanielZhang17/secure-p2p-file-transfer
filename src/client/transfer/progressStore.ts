@@ -1,21 +1,20 @@
+import { openTransferDb, PROGRESS_STORE_NAME, requestToPromise, transactionToPromise } from "./transferDb";
+
 export interface StoredProgress {
   transferId: string;
   fileId: string;
   completed: boolean[];
+  ackHashes?: string[];
   recoveryToken: string;
   expiresAt: number;
 }
 
-const DB_NAME = "secure-p2p-transfer";
-const STORE_NAME = "progress";
-const DB_VERSION = 1;
-
 export async function saveProgress(progress: StoredProgress): Promise<void> {
-  const db = await openDb();
+  const db = await openTransferDb();
 
   try {
-    const transaction = db.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).put(progress, keyFor(progress.transferId, progress.fileId));
+    const transaction = db.transaction(PROGRESS_STORE_NAME, "readwrite");
+    transaction.objectStore(PROGRESS_STORE_NAME).put(progress, keyFor(progress.transferId, progress.fileId));
     await transactionToPromise(transaction);
   } finally {
     db.close();
@@ -23,12 +22,12 @@ export async function saveProgress(progress: StoredProgress): Promise<void> {
 }
 
 export async function loadProgress(transferId: string, fileId: string): Promise<StoredProgress | undefined> {
-  const db = await openDb();
+  const db = await openTransferDb();
 
   try {
     const progress = await requestToPromise<StoredProgress | undefined>(
-      db.transaction(STORE_NAME, "readonly")
-        .objectStore(STORE_NAME)
+      db.transaction(PROGRESS_STORE_NAME, "readonly")
+        .objectStore(PROGRESS_STORE_NAME)
         .get(keyFor(transferId, fileId)),
     );
 
@@ -44,31 +43,4 @@ export async function loadProgress(transferId: string, fileId: string): Promise<
 
 function keyFor(transferId: string, fileId: string): [string, string] {
   return [transferId, fileId];
-}
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function transactionToPromise(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onabort = () => reject(transaction.error);
-    transaction.onerror = () => reject(transaction.error);
-  });
 }

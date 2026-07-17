@@ -64,22 +64,23 @@ export async function deriveSharedTransferKeys(
   const verificationKey = await crypto.subtle.deriveBits(
     { name: "HKDF", hash: "SHA-256", salt, info: textEncoder.encode("verification-phrase") },
     baseKey,
-    128,
+    256,
   );
 
   return { contentKey, verificationKey };
 }
 
-export async function verificationPhrase(verificationKey: ArrayBuffer): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", verificationKey));
-  const words: string[] = [];
+export async function verificationPhrase(
+  verificationKey: ArrayBuffer,
+  transcript: Uint8Array<ArrayBuffer> = new Uint8Array(),
+): Promise<string> {
+  const input = new Uint8Array(verificationKey.byteLength + transcript.byteLength);
+  input.set(new Uint8Array(verificationKey), 0);
+  input.set(transcript, verificationKey.byteLength);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+  const encoded = base32(digest.slice(0, 16));
 
-  for (let index = 0; index < 5; index += 1) {
-    words.push(phraseWords[digest[index] >> 4]);
-    words.push(phraseWords[digest[index] & 0x0f]);
-  }
-
-  return words.join("-");
+  return encoded.match(/.{1,4}/g)?.join("-") ?? encoded;
 }
 
 export async function encryptChunk(
@@ -132,4 +133,26 @@ function equalBytes(left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer
   }
 
   return diff === 0;
+}
+
+function base32(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let bits = 0;
+  let bitCount = 0;
+  let output = "";
+
+  for (const byte of bytes) {
+    bits = (bits << 8) | byte;
+    bitCount += 8;
+    while (bitCount >= 5) {
+      bitCount -= 5;
+      output += alphabet[(bits >>> bitCount) & 31];
+    }
+  }
+
+  if (bitCount > 0) {
+    output += alphabet[(bits << (5 - bitCount)) & 31];
+  }
+
+  return output;
 }

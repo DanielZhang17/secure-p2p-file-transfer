@@ -20,7 +20,7 @@ describe("transfer crypto", () => {
     const recipientPhrase = await verificationPhrase(recipientKeys.verificationKey);
 
     expect(senderPhrase).toBe(recipientPhrase);
-    expect(senderPhrase.split("-")).toHaveLength(10);
+    expect(senderPhrase.replaceAll("-", "")).toMatch(/^[A-Z2-9]{26}$/);
   });
 
   it("derives different verification phrases for different transfer ids", async () => {

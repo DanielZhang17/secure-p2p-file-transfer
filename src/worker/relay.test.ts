@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
 import { SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assertRelayRequestAllowed,
   parseRelayContentLength,
@@ -80,36 +80,187 @@ describe("parseRelayMaxBytes", () => {
 });
 
 describe("relay worker route", () => {
-  it("echoes a small relay body", async () => {
-    const body = new Uint8Array([1, 2, 3, 4]);
+  it("does not expose the unauthenticated echo relay", async () => {
     const response = await SELF.fetch("https://example.com/api/relay", {
       method: "POST",
-      headers: { "content-length": String(body.byteLength) },
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "not_found" });
+  });
+
+  it("stores, reads, and deletes encrypted spillover chunks for a joined room peer", async () => {
+    const room = await createRoom();
+    const sender = await connectToRoom(room);
+    const recipient = await connectToRoom(room);
+    sender.socket.send(JSON.stringify({ type: "join", role: "sender" }));
+    recipient.socket.send(JSON.stringify({ type: "join", role: "recipient" }));
+    const senderRecoveryToken = await waitForRecoveryToken(sender.messages);
+    const recipientRecoveryToken = await waitForRecoveryToken(recipient.messages);
+    const body = new Uint8Array([9, 8, 7, 6]);
+    const path = `https://example.com/api/rooms/${room.roomId}/spillover/transfer-1/file-1/0`;
+
+    const putResponse = await SELF.fetch(path, {
+      method: "PUT",
+      headers: {
+        "content-length": String(body.byteLength),
+        "x-recovery-token": senderRecoveryToken,
+        "x-spillover-iv": "MDEyMzQ1Njc4OWFi",
+      },
       body,
     });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("application/octet-stream");
-    expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
-  });
-
-  it("returns a client error for oversized relay requests", async () => {
-    const response = await SELF.fetch("https://example.com/api/relay", {
-      method: "POST",
-      headers: { "content-length": String(64 * 1024 * 1024 + 1) },
-      body: new Uint8Array([1]),
+    expect(putResponse.status).toBe(201);
+    await expect(putResponse.json()).resolves.toMatchObject({
+      transferId: "transfer-1",
+      fileId: "file-1",
+      chunkIndex: 0,
+      ivBase64: "MDEyMzQ1Njc4OWFi",
+      ciphertextBytes: body.byteLength,
+      expiresAt: room.expiresAt,
     });
 
-    expect(response.status).toBe(413);
-    expect(await response.json()).toEqual({ error: "relay_request_too_large" });
-  });
+    const overwriteResponse = await SELF.fetch(path, {
+      method: "PUT",
+      headers: {
+        "content-length": String(body.byteLength),
+        "x-recovery-token": senderRecoveryToken,
+        "x-spillover-iv": "MDEyMzQ1Njc4OWFi",
+      },
+      body,
+    });
+    expect(overwriteResponse.status).toBe(409);
+    await expect(overwriteResponse.json()).resolves.toEqual({ error: "spillover_chunk_exists" });
 
-  it("returns a client error when relay content length is missing", async () => {
-    const response = await SELF.fetch("https://example.com/api/relay", {
-      method: "POST",
+    const senderReadResponse = await SELF.fetch(path, {
+      headers: { "x-recovery-token": senderRecoveryToken },
+    });
+    expect(senderReadResponse.status).toBe(403);
+    await expect(senderReadResponse.json()).resolves.toEqual({ error: "spillover_recipient_required" });
+
+    const getResponse = await SELF.fetch(path, {
+      headers: { "x-recovery-token": recipientRecoveryToken },
     });
 
-    expect(response.status).toBe(411);
-    expect(await response.json()).toEqual({ error: "content_length_required" });
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.headers.get("content-type")).toBe("application/octet-stream");
+    expect(getResponse.headers.get("x-spillover-iv")).toBe("MDEyMzQ1Njc4OWFi");
+    expect(new Uint8Array(await getResponse.arrayBuffer())).toEqual(body);
+
+    const deleteResponse = await SELF.fetch(path, {
+      method: "DELETE",
+      headers: { "x-recovery-token": recipientRecoveryToken },
+    });
+    expect(deleteResponse.status).toBe(204);
+
+    const missingResponse = await SELF.fetch(path, {
+      headers: { "x-recovery-token": recipientRecoveryToken },
+    });
+    expect(missingResponse.status).toBe(404);
+
+    sender.socket.close();
+    recipient.socket.close();
+  });
+
+  it("rejects spillover uploads without a valid room recovery token", async () => {
+    const room = await createRoom();
+    const body = new Uint8Array([1, 2, 3]);
+    const path = `https://example.com/api/rooms/${room.roomId}/spillover/transfer-1/file-1/0`;
+
+    const response = await SELF.fetch(path, {
+      method: "PUT",
+      headers: {
+        "content-length": String(body.byteLength),
+        "x-recovery-token": "wrong-token",
+        "x-spillover-iv": "MDEyMzQ1Njc4OWFi",
+      },
+      body,
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "invalid_recovery_token" });
   });
 });
+
+interface CreateRoomResponse {
+  roomId: string;
+  code: string;
+  expiresAt: number;
+}
+
+async function createRoom(): Promise<CreateRoomResponse> {
+  const response = await SELF.fetch("https://example.com/api/rooms", {
+    method: "POST",
+    headers: clientIpHeader(),
+  });
+  const body: unknown = await response.json();
+
+  if (!isCreateRoomResponse(body)) {
+    throw new Error("expected room creation response");
+  }
+
+  return body;
+}
+
+async function connectToRoom(room: CreateRoomResponse): Promise<{ messages: unknown[]; socket: WebSocket }> {
+  const response = await SELF.fetch(`https://example.com/api/rooms/${room.roomId}?code=${room.code}`, {
+    headers: { ...clientIpHeader(), Upgrade: "websocket" },
+  });
+  const socket = response.webSocket;
+
+  expect(response.status).toBe(101);
+  if (!socket) {
+    throw new Error("expected websocket");
+  }
+
+  const messages: unknown[] = [];
+  socket.accept();
+  socket.addEventListener("message", (event) => {
+    messages.push(JSON.parse(String(event.data)));
+  });
+
+  return { messages, socket };
+}
+
+let nextIpSuffix = 100;
+
+function clientIpHeader(): Record<string, string> {
+  nextIpSuffix += 1;
+  return { "cf-connecting-ip": `192.0.2.${nextIpSuffix}` };
+}
+
+async function waitForRecoveryToken(messages: unknown[]): Promise<string> {
+  await vi.waitFor(() => {
+    expect(messages).toContainEqual(expect.objectContaining({ type: "joined", recoveryToken: expect.any(String) }));
+  });
+  const joined = messages.find(isJoinedMessage);
+  if (!joined) {
+    throw new Error("expected joined message");
+  }
+
+  return joined.recoveryToken;
+}
+
+function isJoinedMessage(value: unknown): value is { type: "joined"; recoveryToken: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === "joined" &&
+    "recoveryToken" in value &&
+    typeof value.recoveryToken === "string"
+  );
+}
+
+function isCreateRoomResponse(value: unknown): value is CreateRoomResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "roomId" in value &&
+    "code" in value &&
+    "expiresAt" in value &&
+    typeof value.roomId === "string" &&
+    typeof value.code === "string" &&
+    typeof value.expiresAt === "number"
+  );
+}
