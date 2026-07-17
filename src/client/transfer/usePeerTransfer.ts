@@ -75,6 +75,8 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
   const integrityFailedRef = useRef(false);
   const keyWaitersRef = useRef(new Map<string, Array<(key: CryptoKey) => void>>());
   const manifestsRef = useRef(input.manifests);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const peerCreationRef = useRef<Promise<RTCPeerConnection> | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const peerConfirmedTransferIdsRef = useRef(new Set<string>());
   const receivedAckHashesRef = useRef(new Map<string, string>());
@@ -251,6 +253,8 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
           startedSenderPeerRef.current = false;
           channelRef.current = null;
           peerRef.current?.close();
+          pendingIceCandidatesRef.current = [];
+          peerCreationRef.current = null;
           peerRef.current = null;
 
           return "idle";
@@ -281,20 +285,30 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       return peerRef.current;
     }
 
-    const iceServers = await loadTurnIceServers(input.roomId, input.recoveryToken);
-    const peer = createPeerConnection(iceServers);
-    peer.onicecandidate = (event) => {
-      if (event.candidate) {
-        sendRoomMessage({ type: "signal", payload: { type: "ice", candidate: event.candidate.toJSON() } });
-      }
-    };
-    peer.ondatachannel = (event) => {
-      setupChannel(event.channel);
-    };
-    peerRef.current = peer;
-    setStatus("connecting");
+    if (!peerCreationRef.current) {
+      peerCreationRef.current = (async () => {
+        const iceServers = await loadTurnIceServers(input.roomId, input.recoveryToken);
+        const peer = createPeerConnection(iceServers);
+        peer.onicecandidate = (event) => {
+          if (event.candidate) {
+            sendRoomMessage({ type: "signal", payload: { type: "ice", candidate: event.candidate.toJSON() } });
+          }
+        };
+        peer.ondatachannel = (event) => {
+          setupChannel(event.channel);
+        };
+        peerRef.current = peer;
+        setStatus("connecting");
 
-    return peer;
+        return peer;
+      })();
+    }
+
+    try {
+      return await peerCreationRef.current;
+    } finally {
+      peerCreationRef.current = null;
+    }
   }, [input.recoveryToken, input.roomId, sendRoomMessage, setupChannel]);
 
   const startSenderPeer = useCallback(async () => {
@@ -406,6 +420,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       const peer = await ensurePeer();
       if (message.payload.type === "offer") {
         await peer.setRemoteDescription({ type: "offer", sdp: message.payload.sdp });
+        await addPendingIceCandidates(peer, pendingIceCandidatesRef.current);
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
         sendRoomMessage({ type: "signal", payload: { type: "answer", sdp: answer.sdp ?? "" } });
@@ -414,6 +429,12 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
 
       if (message.payload.type === "answer") {
         await peer.setRemoteDescription({ type: "answer", sdp: message.payload.sdp });
+        await addPendingIceCandidates(peer, pendingIceCandidatesRef.current);
+        return;
+      }
+
+      if (!peer.remoteDescription) {
+        pendingIceCandidatesRef.current.push(message.payload.candidate);
         return;
       }
 
@@ -510,6 +531,8 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       channelRef.current?.close();
       peerRef.current?.close();
       channelRef.current = null;
+      pendingIceCandidatesRef.current = [];
+      peerCreationRef.current = null;
       peerRef.current = null;
       directoryWriterRef.current = null;
       incomingRef.current = createIncomingState();
@@ -895,6 +918,15 @@ function chunkKey(transferId: string, fileId: string, chunkIndex: number): strin
 
 function uniqueTransferIds(manifests: FileManifest[]): string[] {
   return Array.from(new Set(manifests.map((manifest) => manifest.transferId)));
+}
+
+async function addPendingIceCandidates(
+  peer: RTCPeerConnection,
+  pendingCandidates: RTCIceCandidateInit[],
+): Promise<void> {
+  for (const candidate of pendingCandidates.splice(0)) {
+    await peer.addIceCandidate(candidate);
+  }
 }
 
 function transferMessageId(message: Exclude<DataChannelTransferMessage, { type: "key-exchange" | "verification-confirmed" }>): string {

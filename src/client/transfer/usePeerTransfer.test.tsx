@@ -535,6 +535,40 @@ describe("usePeerTransfer", () => {
     expect(FakeRTCPeerConnection.instances).toHaveLength(2);
   });
 
+  it("queues early ICE candidates and reuses in-flight peer creation", async () => {
+    let serverListener: ((message: ServerRoomMessage) => void) | undefined;
+    const input = {
+      files: [],
+      manifests: [],
+      onServerMessage: (listener: (message: ServerRoomMessage) => void) => {
+        serverListener = listener;
+        return () => {
+          serverListener = undefined;
+        };
+      },
+      pairingStatus: "connected",
+      role: "recipient" as const,
+      sendRoomMessage: vi.fn(),
+    };
+    const candidate: RTCIceCandidateInit = {
+      candidate: "candidate:1 1 udp 2122260223 192.0.2.1 54321 typ host",
+      sdpMid: "0",
+      sdpMLineIndex: 0,
+    };
+
+    renderHook(() => usePeerTransfer(input));
+
+    await act(async () => {
+      const iceSignal = serverListener?.({ type: "signal", payload: { type: "ice", candidate } });
+      const offerSignal = serverListener?.({ type: "signal", payload: { type: "offer", sdp: "offer-sdp" } });
+      await Promise.all([iceSignal, offerSignal]);
+    });
+
+    expect(FakeRTCPeerConnection.instances).toHaveLength(1);
+    expect(FakeRTCPeerConnection.instances[0]?.remoteDescription).toEqual({ type: "offer", sdp: "offer-sdp" });
+    expect(FakeRTCPeerConnection.instances[0]?.iceCandidates).toEqual([candidate]);
+  });
+
   it("uses Worker-issued TURN ICE servers when creating a peer connection", async () => {
     vi.stubGlobal(
       "fetch",
@@ -751,6 +785,7 @@ class FakeRTCPeerConnection extends EventTarget {
   static readonly instances: FakeRTCPeerConnection[] = [];
   readonly configuration?: RTCConfiguration;
   dataChannel?: FakeDataChannel;
+  readonly iceCandidates: RTCIceCandidateInit[] = [];
   localDescription: RTCSessionDescriptionInit | null = null;
   ondatachannel: ((event: RTCDataChannelEvent) => void) | null = null;
   onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
@@ -762,7 +797,12 @@ class FakeRTCPeerConnection extends EventTarget {
     FakeRTCPeerConnection.instances.push(this);
   }
 
-  addIceCandidate(): Promise<void> {
+  addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+    if (!this.remoteDescription) {
+      return Promise.reject(new Error("remote description is not set"));
+    }
+
+    this.iceCandidates.push(candidate);
     return Promise.resolve();
   }
 
