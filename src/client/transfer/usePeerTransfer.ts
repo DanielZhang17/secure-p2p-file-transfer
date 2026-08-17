@@ -16,6 +16,7 @@ import type {
   ServerRoomMessage,
   TransferProgress,
 } from "../../shared/protocol";
+import { negotiatingIceRoute, selectedIceRoute, type IceRoute } from "../transport/iceRoute";
 import { loadTurnIceServers } from "../transport/turnCredentials";
 import { createPeerConnection } from "../transport/webrtcPeer";
 import { loadChunkAckHashes, loadCompletedChunkIndexes, saveChunkAckProgress } from "./ackProgress";
@@ -73,9 +74,11 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
   const directoryWriterRef = useRef<ReceivedFileStreamWriter | null>(null);
   const expectedAckHashesRef = useRef(new Map<string, string>());
   const integrityFailedRef = useRef(false);
+  const iceRouteRefreshRef = useRef(0);
   const keyWaitersRef = useRef(new Map<string, Array<(key: CryptoKey) => void>>());
   const manifestsRef = useRef(input.manifests);
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const observedIceTransportsRef = useRef(new WeakSet<RTCIceTransport>());
   const peerCreationRef = useRef<Promise<RTCPeerConnection> | null>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const peerConfirmedTransferIdsRef = useRef(new Set<string>());
@@ -85,12 +88,14 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
   const sentBytesRef = useRef(0);
   const speedSampleRef = useRef({ at: 0, bytes: 0 });
   const startedSenderPeerRef = useRef(false);
+  const statusRef = useRef<PeerTransferStatus>("idle");
   const verifiedAckKeysRef = useRef(new Set<string>());
   const [activeLanes, setActiveLanes] = useState(0);
   const [completedChunks, setCompletedChunks] = useState(0);
   const [confirmedVerificationPhrase, setConfirmedVerificationPhrase] = useState<string | undefined>(undefined);
   const [incomingManifests, setIncomingManifests] = useState<FileManifest[]>([]);
   const [integrityStatus, setIntegrityStatus] = useState<TransferIntegrityStatus>("idle");
+  const [iceRoute, setIceRoute] = useState<IceRoute>(negotiatingIceRoute);
   const [peerConfirmedTransferIds, setPeerConfirmedTransferIds] = useState<Set<string>>(new Set());
   const [receivedFiles, setReceivedFiles] = useState<ReceivedFile[]>([]);
   const [receiveDirectoryReady, setReceiveDirectoryReady] = useState(false);
@@ -99,8 +104,14 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
   const [sentBytes, setSentBytes] = useState(0);
   const [speedBytesPerSecond, setSpeedBytesPerSecond] = useState(0);
   const [spilloverBytes, setSpilloverBytes] = useState(0);
-  const [status, setStatus] = useState<PeerTransferStatus>("idle");
+  const [status, setStatusState] = useState<PeerTransferStatus>("idle");
+  const [usingRecoveryRelay, setUsingRecoveryRelay] = useState(false);
   const [verificationPhrase, setVerificationPhrase] = useState<string | undefined>(undefined);
+  const setStatus = useCallback<Dispatch<SetStateAction<PeerTransferStatus>>>((nextStatus) => {
+    const resolvedStatus = typeof nextStatus === "function" ? nextStatus(statusRef.current) : nextStatus;
+    statusRef.current = resolvedStatus;
+    setStatusState(resolvedStatus);
+  }, []);
   const incomingRef = useRef(createIncomingState());
   manifestsRef.current = input.manifests;
 
@@ -117,7 +128,8 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
   const progress = useMemo<TransferProgress>(
     () => ({
       transferId: progressManifests[0]?.transferId ?? "pending",
-      mode: spilloverBytes > 0 ? "recovery-relay" : "direct-p2p",
+      mode: usingRecoveryRelay ? "recovery-relay" : iceRoute.mode,
+      addressFamily: iceRoute.addressFamily,
       totalBytes,
       sentBytes,
       receivedBytes,
@@ -131,6 +143,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
     [
       activeLanes,
       completedChunks,
+      iceRoute,
       progressManifests,
       receivedBytes,
       retryCount,
@@ -140,10 +153,43 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       status,
       totalBytes,
       totalChunks,
+      usingRecoveryRelay,
     ],
   );
 
   const sendRoomMessage = input.sendRoomMessage;
+
+  const resetIceRoute = useCallback(() => {
+    iceRouteRefreshRef.current += 1;
+    setIceRoute(negotiatingIceRoute);
+  }, []);
+
+  const refreshIceRoute = useCallback(async (peer: RTCPeerConnection) => {
+    if (peerRef.current !== peer) {
+      return;
+    }
+
+    const refresh = iceRouteRefreshRef.current + 1;
+    iceRouteRefreshRef.current = refresh;
+    try {
+      const route = selectedIceRoute(await peer.getStats());
+      if (peerRef.current === peer && iceRouteRefreshRef.current === refresh) {
+        setIceRoute(route);
+      }
+    } catch {
+      // Route reporting is diagnostic and must not interrupt a working transfer.
+    }
+  }, []);
+
+  const observeIceRoute = useCallback((peer: RTCPeerConnection) => {
+    const iceTransport = peer.sctp?.transport.iceTransport;
+    if (!iceTransport || observedIceTransportsRef.current.has(iceTransport)) {
+      return;
+    }
+
+    observedIceTransportsRef.current.add(iceTransport);
+    iceTransport.addEventListener("selectedcandidatepairchange", () => void refreshIceRoute(peer));
+  }, [refreshIceRoute]);
 
   const sendTransferKeyExchanges = useCallback(
     async (send: (message: TransferKeyExchangeMessage) => void) => {
@@ -163,7 +209,11 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
   }, [input.manifests, input.pairingStatus, input.role, sendRoomMessage, sendTransferKeyExchanges]);
 
   const handleIncomingTransferMessage = useCallback(
-    async (message: DataChannelTransferMessage, sendReply: (reply: TransferKeyExchangeMessage) => void) => {
+    async (
+      message: DataChannelTransferMessage,
+      sendReply: (reply: TransferKeyExchangeMessage) => void,
+      source: "data-channel" | "room",
+    ) => {
       if (message.type === "key-exchange" && !hasSentTransferKeyExchange(incomingRef.current, message.transferId)) {
         sendReply(await createTransferKeyExchangeMessage(incomingRef.current, message.transferId));
       }
@@ -184,6 +234,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       }
 
       if (message.type === "manifest") {
+        setUsingRecoveryRelay(source === "room");
         setStatus("transferring");
         setIntegrityStatus("pending");
         startSpeedSample();
@@ -238,27 +289,35 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       channelRef.current = channel;
       if (channel.readyState === "open") {
         setStatus("ready");
+        const peer = peerRef.current;
+        if (peer) {
+          observeIceRoute(peer);
+          void refreshIceRoute(peer);
+        }
         void sendTransferKeyExchanges((message) => channel.send(JSON.stringify(message)));
       }
       channel.addEventListener("open", () => {
         setStatus("ready");
+        const peer = peerRef.current;
+        if (peer) {
+          observeIceRoute(peer);
+          void refreshIceRoute(peer);
+        }
         void sendTransferKeyExchanges((message) => channel.send(JSON.stringify(message)));
       });
       channel.addEventListener("close", () => {
-        setStatus((current) => {
-          if (current === "complete") {
-            return current;
-          }
+        if (statusRef.current === "complete") {
+          return;
+        }
 
-          startedSenderPeerRef.current = false;
-          channelRef.current = null;
-          peerRef.current?.close();
-          pendingIceCandidatesRef.current = [];
-          peerCreationRef.current = null;
-          peerRef.current = null;
-
-          return "idle";
-        });
+        startedSenderPeerRef.current = false;
+        channelRef.current = null;
+        peerRef.current?.close();
+        pendingIceCandidatesRef.current = [];
+        peerCreationRef.current = null;
+        peerRef.current = null;
+        resetIceRoute();
+        setStatus("idle");
       });
       channel.addEventListener("message", (event) => {
         if (typeof event.data !== "string") {
@@ -271,13 +330,17 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
         }
 
         receiveQueueRef.current = receiveQueueRef.current
-          .then(() => handleIncomingTransferMessage(message, (reply) => channel.send(JSON.stringify(reply))))
+          .then(() => handleIncomingTransferMessage(
+            message,
+            (reply) => channel.send(JSON.stringify(reply)),
+            "data-channel",
+          ))
           .catch(() => {
             setStatus("error");
           });
       });
     },
-    [handleIncomingTransferMessage, sendTransferKeyExchanges],
+    [handleIncomingTransferMessage, observeIceRoute, refreshIceRoute, resetIceRoute, sendTransferKeyExchanges],
   );
 
   const ensurePeer = useCallback(async () => {
@@ -289,6 +352,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       peerCreationRef.current = (async () => {
         const iceServers = await loadTurnIceServers(input.roomId, input.recoveryToken);
         const peer = createPeerConnection(iceServers);
+        resetIceRoute();
         peer.onicecandidate = (event) => {
           if (event.candidate) {
             sendRoomMessage({ type: "signal", payload: { type: "ice", candidate: event.candidate.toJSON() } });
@@ -297,6 +361,17 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
         peer.ondatachannel = (event) => {
           setupChannel(event.channel);
         };
+        peer.addEventListener("iceconnectionstatechange", () => {
+          if (peer.iceConnectionState === "connected" || peer.iceConnectionState === "completed") {
+            observeIceRoute(peer);
+            void refreshIceRoute(peer);
+          } else if (
+            peerRef.current === peer
+            && (peer.iceConnectionState === "new" || peer.iceConnectionState === "checking")
+          ) {
+            resetIceRoute();
+          }
+        });
         peerRef.current = peer;
         setStatus("connecting");
 
@@ -309,7 +384,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
     } finally {
       peerCreationRef.current = null;
     }
-  }, [input.recoveryToken, input.roomId, sendRoomMessage, setupChannel]);
+  }, [input.recoveryToken, input.roomId, observeIceRoute, refreshIceRoute, resetIceRoute, sendRoomMessage, setupChannel]);
 
   const startSenderPeer = useCallback(async () => {
     if (startedSenderPeerRef.current) {
@@ -357,7 +432,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
           .then(() =>
             handleIncomingTransferMessage(message.message, (reply) => {
               sendRoomMessage({ type: "transfer", message: reply });
-            }),
+            }, "room"),
           )
           .catch(() => {
             setStatus("error");
@@ -374,6 +449,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
             }
 
             setStatus("transferring");
+            setUsingRecoveryRelay(true);
             const chunk = await downloadSpilloverChunk(credentials, message.chunk);
             const file = await acceptTransferMessage(incomingRef.current, chunk);
             const manifest = incomingRef.current.manifests.get(chunk.fileId);
@@ -552,6 +628,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       setCompletedChunks(0);
       setConfirmedVerificationPhrase(undefined);
       setIncomingManifests([]);
+      resetIceRoute();
       setIntegrityStatus("idle");
       setPeerConfirmedTransferIds(new Set());
       setReceivedBytes(0);
@@ -562,9 +639,10 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
       setSpeedBytesPerSecond(0);
       setSpilloverBytes(0);
       setStatus("idle");
+      setUsingRecoveryRelay(false);
       setVerificationPhrase(undefined);
     }
-  }, [input.pairingStatus]);
+  }, [input.pairingStatus, resetIceRoute]);
 
   const chooseReceiveDirectory = useCallback(async () => {
     const picker = directoryPicker();
@@ -609,6 +687,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
     receivedBytesRef.current = 0;
     setSpeedBytesPerSecond(0);
     setSpilloverBytes(0);
+    setUsingRecoveryRelay(false);
     startSpeedSample();
 
     try {
@@ -655,6 +734,7 @@ export function usePeerTransfer(input: UsePeerTransferInput) {
           },
         });
       } else if (credentials) {
+        setUsingRecoveryRelay(true);
         await sendSpilloverTransferFiles({
           credentials,
           contentKeyForTransfer: waitForTransferContentKey,

@@ -3,7 +3,7 @@ import type { FileManifest, TransferProgress } from "../shared/protocol";
 import { FilePicker } from "./components/FilePicker";
 import { JoinRoom } from "./components/JoinRoom";
 import { StatsView } from "./components/StatsView";
-import { TransferMonitor } from "./components/TransferMonitor";
+import { formatTransferRoute, TransferMonitor } from "./components/TransferMonitor";
 import { VerifyPhrase } from "./components/VerifyPhrase";
 import {
   languageStorageKey,
@@ -25,7 +25,8 @@ type Mode = "landing" | "send" | "receive" | "stats";
 
 const seedProgress: TransferProgress = {
   transferId: "pending",
-  mode: "direct-p2p",
+  mode: "negotiating",
+  addressFamily: "unknown",
   totalBytes: 0,
   sentBytes: 0,
   receivedBytes: 0,
@@ -62,8 +63,13 @@ export function App() {
 
   const fileCountLabel = formatFileCount(transfer.files.length, locale, t);
   const needsFileReselection = mode === "send" && transfer.files.length === 0 && transfer.manifests.length > 0;
-  const displayedProgress =
-    peerTransfer.progress.totalBytes > 0 ? peerTransfer.progress : mode === "send" ? transfer.progress : seedProgress;
+  const hasPeerProgress =
+    peerTransfer.status !== "idle" || peerTransfer.progress.transferId !== "pending";
+  const displayedProgress = hasPeerProgress
+    ? peerTransfer.progress
+    : mode === "send"
+      ? transfer.progress
+      : seedProgress;
   const workspaceLocked = mode === "landing";
 
   const chooseMode = (nextMode: Exclude<Mode, "stats">) => {
@@ -546,7 +552,7 @@ function PeerHealth({
         </div>
         <div>
           <span>{t.peer.transport}</span>
-          <strong>{progress.mode}</strong>
+          <strong>{formatTransferRoute(progress, t.monitor)}</strong>
         </div>
         <div>
           <span>{t.peer.activeLanes}</span>

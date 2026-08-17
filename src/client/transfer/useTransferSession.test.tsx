@@ -20,7 +20,8 @@ describe("useTransferSession", () => {
     expect(result.current.manifests).toEqual([]);
     expect(result.current.progress).toMatchObject({
       transferId: "pending",
-      mode: "direct-p2p",
+      mode: "negotiating",
+      addressFamily: "unknown",
       totalBytes: 0,
       totalChunks: 0,
       activeLanes: 0,

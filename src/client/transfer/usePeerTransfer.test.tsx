@@ -88,11 +88,33 @@ describe("usePeerTransfer", () => {
     await waitFor(() => expect(result.current.verificationPhrase).toBeDefined());
     act(() => result.current.confirmVerificationPhrase());
 
+    await act(async () => {
+      await serverListener?.({ type: "transfer", message: createManifestMessage(manifest) });
+    });
+    await waitFor(() => {
+      expect(result.current.progress.mode).toBe("recovery-relay");
+    });
+
+    const peer = FakeRTCPeerConnection.instances[0];
+    peer?.setStats([
+      { id: "transport", type: "transport", selectedCandidatePairId: "pair" },
+      { id: "pair", type: "candidate-pair", localCandidateId: "local", remoteCandidateId: "remote" },
+      { id: "local", type: "local-candidate", candidateType: "host", address: "2001:db8::1" },
+      { id: "remote", type: "remote-candidate", candidateType: "host", address: "2001:db8::2" },
+    ]);
+    await act(async () => {
+      peer?.emitIceConnectionState("connected");
+      await Promise.resolve();
+    });
+
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     await act(async () => {
       channel.dispatchMessage(JSON.stringify(createManifestMessage(manifest)));
       await Promise.resolve();
       await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.progress).toMatchObject({ mode: "direct-p2p", addressFamily: "ipv6" });
     });
     expect(result.current.progress).toMatchObject({
       transferId: "transfer-1",
@@ -423,9 +445,14 @@ describe("usePeerTransfer", () => {
   });
 
   it("falls back to encrypted spillover when no peer data channel is open", async () => {
+    let releaseUpload: (() => void) | undefined;
+    const uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
     vi.stubGlobal("fetch", vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const body = init?.body as ArrayBuffer | undefined;
       const headers = new Headers(init?.headers);
+      await uploadGate;
 
       return Response.json({
         transferId: "transfer-1",
@@ -490,7 +517,15 @@ describe("usePeerTransfer", () => {
     await act(async () => {
       await serverListener?.({ type: "transfer", message: { type: "verification-confirmed", transferId: manifest.transferId } });
     });
-    await act(async () => result.current.sendSelectedFiles());
+    let sendPromise: Promise<void> | undefined;
+    act(() => {
+      sendPromise = result.current.sendSelectedFiles();
+    });
+    await waitFor(() => {
+      expect(result.current.progress.mode).toBe("recovery-relay");
+    });
+    releaseUpload?.();
+    await act(async () => sendPromise);
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(sendRoomMessage).toHaveBeenCalledWith({ type: "transfer", message: { type: "manifest", manifest } });
@@ -607,6 +642,121 @@ describe("usePeerTransfer", () => {
         iceServers: [{ urls: ["turn:turn.cloudflare.com:3478?transport=udp"], username: "u", credential: "p" }],
       });
     });
+  });
+
+  it("updates progress from the selected ICE candidate pair", async () => {
+    let serverListener: ((message: ServerRoomMessage) => void) | undefined;
+    const input = {
+      files: [],
+      manifests: [],
+      onServerMessage: (listener: (message: ServerRoomMessage) => void) => {
+        serverListener = listener;
+        return () => {
+          serverListener = undefined;
+        };
+      },
+      pairingStatus: "connected",
+      role: "sender" as const,
+      sendRoomMessage: vi.fn(),
+    };
+    const { result } = renderHook(() => usePeerTransfer(input));
+
+    await act(async () => {
+      await serverListener?.({ type: "peer-joined", role: "recipient" });
+    });
+    const peer = FakeRTCPeerConnection.instances[0];
+    peer?.setStats([
+      { id: "transport", type: "transport", selectedCandidatePairId: "pair" },
+      { id: "pair", type: "candidate-pair", localCandidateId: "local", remoteCandidateId: "remote" },
+      { id: "local", type: "local-candidate", candidateType: "relay", address: "192.0.2.1" },
+      { id: "remote", type: "remote-candidate", candidateType: "prflx", address: null },
+    ]);
+    await act(async () => {
+      peer?.emitIceConnectionState("connected");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.progress).toMatchObject({ mode: "turn-relay", addressFamily: "ipv4" });
+    });
+
+    peer?.setStats([
+      { id: "transport", type: "transport", selectedCandidatePairId: "pair-v6" },
+      { id: "pair-v6", type: "candidate-pair", localCandidateId: "local-v6", remoteCandidateId: "remote-v6" },
+      { id: "local-v6", type: "local-candidate", candidateType: "host", address: "2001:db8::1" },
+      { id: "remote-v6", type: "remote-candidate", candidateType: "host", address: "2001:db8::2" },
+    ]);
+    await act(async () => {
+      peer?.emitIceConnectionState("completed");
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.progress).toMatchObject({ mode: "direct-p2p", addressFamily: "ipv6" });
+    });
+
+    act(() => {
+      peer?.dataChannel?.close();
+    });
+    await waitFor(() => {
+      expect(result.current.progress).toMatchObject({ mode: "negotiating", addressFamily: "unknown" });
+    });
+  });
+
+  it("ignores an older ICE route result after the selected pair changes", async () => {
+    let serverListener: ((message: ServerRoomMessage) => void) | undefined;
+    const input = {
+      files: [],
+      manifests: [],
+      onServerMessage: (listener: (message: ServerRoomMessage) => void) => {
+        serverListener = listener;
+        return () => {
+          serverListener = undefined;
+        };
+      },
+      pairingStatus: "connected",
+      role: "sender" as const,
+      sendRoomMessage: vi.fn(),
+    };
+    const { result } = renderHook(() => usePeerTransfer(input));
+
+    await act(async () => {
+      await serverListener?.({ type: "peer-joined", role: "recipient" });
+      await Promise.resolve();
+    });
+    const peer = FakeRTCPeerConnection.instances[0];
+    let resolveOldRoute: ((report: RTCStatsReport) => void) | undefined;
+    peer?.queueStats(new Promise<RTCStatsReport>((resolve) => {
+      resolveOldRoute = resolve;
+    }));
+    act(() => {
+      peer?.emitIceConnectionState("connected");
+    });
+
+    peer?.setStats([
+      { id: "transport", type: "transport", selectedCandidatePairId: "new-pair" },
+      { id: "new-pair", type: "candidate-pair", localCandidateId: "new-local", remoteCandidateId: "new-remote" },
+      { id: "new-local", type: "local-candidate", candidateType: "host", address: "2001:db8::1" },
+      { id: "new-remote", type: "remote-candidate", candidateType: "host", address: "2001:db8::2" },
+    ]);
+    await act(async () => {
+      peer?.emitSelectedCandidatePairChange();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.progress).toMatchObject({ mode: "direct-p2p", addressFamily: "ipv6" });
+    });
+
+    await act(async () => {
+      resolveOldRoute?.(statsReport([
+        { id: "transport", type: "transport", selectedCandidatePairId: "old-pair" },
+        { id: "old-pair", type: "candidate-pair", localCandidateId: "old-local", remoteCandidateId: "old-remote" },
+        { id: "old-local", type: "local-candidate", candidateType: "relay", address: "192.0.2.1" },
+        { id: "old-remote", type: "remote-candidate", candidateType: "prflx", address: null },
+      ]));
+      await Promise.resolve();
+    });
+    expect(result.current.progress).toMatchObject({ mode: "direct-p2p", addressFamily: "ipv6" });
   });
 
   it("marks sender integrity verified when all sent chunks are acknowledged with matching hashes", async () => {
@@ -781,15 +931,26 @@ class FakeDataChannel extends EventTarget {
   }
 }
 
+class FakeIceTransport extends EventTarget {
+  emitSelectedCandidatePairChange(): void {
+    this.dispatchEvent(new Event("selectedcandidatepairchange"));
+  }
+}
+
 class FakeRTCPeerConnection extends EventTarget {
   static readonly instances: FakeRTCPeerConnection[] = [];
   readonly configuration?: RTCConfiguration;
   dataChannel?: FakeDataChannel;
   readonly iceCandidates: RTCIceCandidateInit[] = [];
+  readonly iceTransport = new FakeIceTransport();
+  iceConnectionState: RTCIceConnectionState = "new";
   localDescription: RTCSessionDescriptionInit | null = null;
   ondatachannel: ((event: RTCDataChannelEvent) => void) | null = null;
   onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
+  readonly sctp = { transport: { iceTransport: this.iceTransport } };
+  private readonly queuedStats: Array<Promise<RTCStatsReport>> = [];
+  private stats: RTCStatsReport = new Map() as unknown as RTCStatsReport;
 
   constructor(configuration?: RTCConfiguration) {
     super();
@@ -825,6 +986,27 @@ class FakeRTCPeerConnection extends EventTarget {
     this.ondatachannel?.({ channel } as unknown as RTCDataChannelEvent);
   }
 
+  emitIceConnectionState(state: RTCIceConnectionState): void {
+    this.iceConnectionState = state;
+    this.dispatchEvent(new Event("iceconnectionstatechange"));
+  }
+
+  emitSelectedCandidatePairChange(): void {
+    this.iceTransport.emitSelectedCandidatePairChange();
+  }
+
+  getStats(): Promise<RTCStatsReport> {
+    return this.queuedStats.shift() ?? Promise.resolve(this.stats);
+  }
+
+  queueStats(stats: Promise<RTCStatsReport>): void {
+    this.queuedStats.push(stats);
+  }
+
+  setStats(stats: Array<Record<string, unknown>>): void {
+    this.stats = statsReport(stats);
+  }
+
   setLocalDescription(description: RTCSessionDescriptionInit): Promise<void> {
     this.localDescription = description;
     return Promise.resolve();
@@ -834,6 +1016,10 @@ class FakeRTCPeerConnection extends EventTarget {
     this.remoteDescription = description;
     return Promise.resolve();
   }
+}
+
+function statsReport(stats: Array<Record<string, unknown>>): RTCStatsReport {
+  return new Map(stats.map((stat) => [stat.id, stat])) as unknown as RTCStatsReport;
 }
 
 function deleteProgressDb(): Promise<void> {

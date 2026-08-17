@@ -1,4 +1,4 @@
-import type { TransferProgress } from "../../shared/protocol";
+import type { TransferAddressFamily, TransferMode, TransferProgress } from "../../shared/protocol";
 
 export interface TransferMonitorProps {
   labels?: TransferMonitorLabels;
@@ -13,6 +13,8 @@ export interface TransferMonitorLabels {
   retries: string;
   speed: string;
   spillover: string;
+  modes: Record<TransferMode, string>;
+  addressFamilies: Record<Exclude<TransferAddressFamily, "unknown">, string>;
 }
 
 const defaultLabels: TransferMonitorLabels = {
@@ -23,6 +25,13 @@ const defaultLabels: TransferMonitorLabels = {
   retries: "Retries",
   speed: "Speed",
   spillover: "Encrypted recovery spillover is active.",
+  modes: {
+    negotiating: "Detecting route",
+    "direct-p2p": "Direct P2P",
+    "turn-relay": "TURN relay",
+    "recovery-relay": "Recovery relay",
+  },
+  addressFamilies: { ipv4: "IPv4", ipv6: "IPv6" },
 };
 
 export function TransferMonitor({ labels = defaultLabels, progress }: TransferMonitorProps) {
@@ -33,7 +42,7 @@ export function TransferMonitor({ labels = defaultLabels, progress }: TransferMo
     <section className="transfer-monitor" aria-label={labels.label}>
       <div>
         <span>{labels.mode}</span>
-        <strong>{progress.mode}</strong>
+        <strong>{formatTransferRoute(progress, labels)}</strong>
       </div>
       <div>
         <span>{labels.progress}</span>
@@ -54,6 +63,19 @@ export function TransferMonitor({ labels = defaultLabels, progress }: TransferMo
       {progress.spilloverBytes > 0 ? <p className="warning">{labels.spillover}</p> : null}
     </section>
   );
+}
+
+export function formatTransferRoute(progress: TransferProgress, labels: TransferMonitorLabels): string {
+  const mode = labels.modes[progress.mode];
+  if (
+    progress.addressFamily === "unknown"
+    || progress.mode === "negotiating"
+    || progress.mode === "recovery-relay"
+  ) {
+    return mode;
+  }
+
+  return `${mode} · ${labels.addressFamilies[progress.addressFamily]}`;
 }
 
 function formatBytesPerSecond(bytesPerSecond: number): string {

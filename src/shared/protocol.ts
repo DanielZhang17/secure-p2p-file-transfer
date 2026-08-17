@@ -1,4 +1,5 @@
-export type TransferMode = "direct-p2p" | "turn-relay" | "recovery-relay";
+export type TransferMode = "negotiating" | "direct-p2p" | "turn-relay" | "recovery-relay";
+export type TransferAddressFamily = "unknown" | "ipv4" | "ipv6";
 
 export type RoomRole = "sender" | "recipient";
 
@@ -32,6 +33,7 @@ export interface SpilloverChunkRef {
 export interface TransferProgress {
   transferId: string;
   mode: TransferMode;
+  addressFamily: TransferAddressFamily;
   totalBytes: number;
   sentBytes: number;
   receivedBytes: number;

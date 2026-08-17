@@ -255,6 +255,13 @@ export const messages = {
       activeLanes: "Active lanes",
       retries: "Retries",
       spillover: "Encrypted recovery spillover is active.",
+      modes: {
+        negotiating: "Detecting route",
+        "direct-p2p": "Direct P2P",
+        "turn-relay": "TURN relay",
+        "recovery-relay": "Recovery relay",
+      },
+      addressFamilies: { ipv4: "IPv4", ipv6: "IPv6" },
     },
     verify: {
       confirm: "The phrases match",
@@ -454,6 +461,13 @@ export const messages = {
       activeLanes: "活动通道",
       retries: "重试",
       spillover: "加密恢复缓存已启用。",
+      modes: {
+        negotiating: "正在检测路径",
+        "direct-p2p": "P2P 直连",
+        "turn-relay": "TURN 中继",
+        "recovery-relay": "恢复中继",
+      },
+      addressFamilies: { ipv4: "IPv4", ipv6: "IPv6" },
     },
     verify: {
       confirm: "短语一致",
@@ -646,6 +660,13 @@ export const messages = {
       activeLanes: "Carriles activos",
       retries: "Reintentos",
       spillover: "Spillover cifrado de recuperación activo.",
+      modes: {
+        negotiating: "Detectando ruta",
+        "direct-p2p": "P2P directo",
+        "turn-relay": "Relay TURN",
+        "recovery-relay": "Relay de recuperación",
+      },
+      addressFamilies: { ipv4: "IPv4", ipv6: "IPv6" },
     },
     verify: {
       confirm: "Las frases coinciden",
@@ -838,6 +859,13 @@ export const messages = {
       activeLanes: "有効レーン",
       retries: "再試行",
       spillover: "暗号化復旧スピルオーバーが有効です。",
+      modes: {
+        negotiating: "経路を検出中",
+        "direct-p2p": "P2P 直接接続",
+        "turn-relay": "TURN リレー",
+        "recovery-relay": "復旧リレー",
+      },
+      addressFamilies: { ipv4: "IPv4", ipv6: "IPv6" },
     },
     verify: {
       confirm: "フレーズが一致",

@@ -28,7 +28,8 @@ export function useTransferSession(recoveryScope: OutgoingManifestRecoveryScope 
 
     return {
       transferId: manifests[0]?.transferId ?? "pending",
-      mode: "direct-p2p",
+      mode: "negotiating",
+      addressFamily: "unknown",
       totalBytes,
       sentBytes: 0,
       receivedBytes: 0,
