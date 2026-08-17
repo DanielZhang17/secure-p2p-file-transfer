@@ -2,6 +2,9 @@
   "name": "secure-p2p-file-transfer",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
@@ -19,7 +22,7 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "0.18.5",
+    "@cloudflare/vitest-pool-workers": "0.21.3",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "14.6.1",
@@ -29,8 +32,8 @@
     "fake-indexeddb": "6.2.5",
     "happy-dom": "20.9.0",
     "typescript": "6.0.3",
-    "vite": "8.0.16",
+    "vite": "8.2.1",
     "vitest": "4.1.8",
-    "wrangler": "4.111.0"
+    "wrangler": "4.123.0"
   }
 }
